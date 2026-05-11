@@ -1,0 +1,104 @@
+# =============================================================================
+# F.L.U.I.D — Docker Compose
+# 3 serviços: API (FastAPI) + Redis (Broker) + Worker (Celery)
+# =============================================================================
+#
+# Uso:
+#   docker compose up --build          # Sobe todos os serviços
+#   docker compose up -d               # Background
+#   docker compose logs -f worker      # Acompanha logs do worker
+#   docker compose down                # Para tudo
+#
+# Testes:
+#   curl http://localhost:8000/api/v1/health
+#
+# =============================================================================
+
+services:
+  # --- Redis (Message Broker + Result Backend) ---
+  redis:
+    image: redis:7-alpine
+    container_name: fluid-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # --- API Principal (FastAPI + Uvicorn) ---
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fluid-api
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - WORKSPACE_DIR=/app/workspace
+      - VINA_BINARY_PATH=/usr/local/bin/vina
+      - LOG_LEVEL=INFO
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - NCBI_API_KEY=${NCBI_API_KEY:-}
+    volumes:
+      - workspace-data:/app/workspace
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      uvicorn src.api.main:app
+      --host 0.0.0.0
+      --port 8000
+      --workers 2
+    restart: unless-stopped
+
+  # --- Worker Celery (Processamento Pesado) ---
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fluid-worker
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - WORKSPACE_DIR=/app/workspace
+      - VINA_BINARY_PATH=/usr/local/bin/vina
+      - LOG_LEVEL=INFO
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - NCBI_API_KEY=${NCBI_API_KEY:-}
+    volumes:
+      - workspace-data:/app/workspace
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: >
+      celery -A src.workers.celery_app worker
+      --loglevel=info
+      --concurrency=4
+      --max-tasks-per-child=50
+    restart: unless-stopped
+
+  # --- Dashboard (Dash/Plotly) --- (opcional, descomente para ativar)
+  # dashboard:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: fluid-dashboard
+  #   ports:
+  #     - "8050:8050"
+  #   environment:
+  #     - REDIS_URL=redis://redis:6379/0
+  #   depends_on:
+  #     - api
+  #   command: python -m src.dashboard.visualizer
+  #   restart: unless-stopped
+
+volumes:
+  redis-data:
+    driver: local
+  workspace-data:
+    driver: local
