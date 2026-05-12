@@ -21,6 +21,7 @@ from typing import Any
 import customtkinter as ctk
 
 from src.desktop.api_client import FluidAPIClient, JobStatus
+from src.desktop.terminal_gui import LogTerminalFrame
 
 # --- Tema ---
 ctk.set_appearance_mode("dark")
@@ -412,7 +413,6 @@ class App(ctk.CTk):
         workspace = ctk.CTkFrame(self, fg_color=C["bg"], corner_radius=0)
         workspace.grid(row=0, column=1, sticky="nsew", padx=(2, 0))
         workspace.grid_rowconfigure(1, weight=1)
-        workspace.grid_rowconfigure(2, weight=1)
         workspace.grid_columnconfigure(0, weight=1)
 
         # Top Bar: Status + Progress
@@ -430,13 +430,36 @@ class App(ctk.CTk):
         self.progress_bar.grid(row=1, column=0, padx=15, pady=(2, 10), sticky="ew")
         self.progress_bar.set(0)
 
-        # Middle: Tabela de resultados
-        self.result_table = ResultTableFrame(workspace)
-        self.result_table.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
+        # --- Tabview: Pipeline | Terminal ---
+        self.tabview = ctk.CTkTabview(
+            workspace, fg_color=C["bg"],
+            segmented_button_fg_color=C["surface"],
+            segmented_button_selected_color="#0288d1",
+            segmented_button_unselected_color=C["surface"],
+        )
+        self.tabview.grid(row=1, column=0, sticky="nsew", padx=10, pady=(5, 10))
 
-        # Bottom: Viewer de fluidos
-        self.fluid_viewer = FluidViewerFrame(workspace)
-        self.fluid_viewer.grid(row=2, column=0, sticky="nsew", padx=10, pady=(5, 10))
+        # Aba 1: Pipeline (tabela + fluidos)
+        tab_pipeline = self.tabview.add("📊 Pipeline")
+        tab_pipeline.grid_rowconfigure(0, weight=1)
+        tab_pipeline.grid_rowconfigure(1, weight=1)
+        tab_pipeline.grid_columnconfigure(0, weight=1)
+
+        self.result_table = ResultTableFrame(tab_pipeline)
+        self.result_table.grid(row=0, column=0, sticky="nsew", pady=(0, 5))
+
+        self.fluid_viewer = FluidViewerFrame(tab_pipeline)
+        self.fluid_viewer.grid(row=1, column=0, sticky="nsew", pady=(5, 0))
+
+        # Aba 2: Terminal de observabilidade
+        tab_terminal = self.tabview.add("📟 Terminal")
+        tab_terminal.grid_rowconfigure(0, weight=1)
+        tab_terminal.grid_columnconfigure(0, weight=1)
+
+        self.log_terminal = LogTerminalFrame(
+            tab_terminal, show_start_button=False,
+        )
+        self.log_terminal.grid(row=0, column=0, sticky="nsew")
 
     # ----------------------------------------------------------------
     # API Health Check (thread)
@@ -464,6 +487,13 @@ class App(ctk.CTk):
         self.status_label.configure(text="📡 Submetendo job...", text_color=C["text"])
         self.progress_bar.set(0)
         self.result_table.clear()
+
+        # Log no terminal
+        tlog = self.log_terminal.get_logger()
+        tlog.info("=" * 48)
+        tlog.info(f"JOB SUBMETIDO: PDB={inputs['pdb_id']} classe={inputs['pathogen_class']}")
+        tlog.info(f"  Ligantes: {len(inputs.get('ligand_smiles', []))}")
+        tlog.info("=" * 48)
 
         threading.Thread(target=self._submit_job, args=(inputs,), daemon=True).start()
 
@@ -497,10 +527,12 @@ class App(ctk.CTk):
         )
         self.progress_bar.set(0.05)
         self._polling = True
+        self.log_terminal.get_logger().info(f"Job aceito pelo servidor: {job_id}")
 
     def _on_error(self, error: str) -> None:
         self.status_label.configure(text=f"❌ {error}", text_color=C["red"])
         self.sidebar.run_btn.configure(state="normal", text="▶  Run F.L.U.I.D Pipeline")
+        self.log_terminal.get_logger().error(f"ERRO: {error}")
 
     # ----------------------------------------------------------------
     # Polling — .after(2000) — thread-safe, roda no mainloop
@@ -524,6 +556,9 @@ class App(ctk.CTk):
         self.status_label.configure(
             text=f"📡 {step} ({int(status.progress * 100)}%)",
             text_color=C["text"],
+        )
+        self.log_terminal.get_logger().info(
+            f"Polling: {step} | progress={status.progress:.0%}"
         )
 
         if status.status == "completed":

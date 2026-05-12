@@ -26,12 +26,12 @@ import numpy as np
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from langchain.output_parsers import PydanticOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
 
 from src.config import FluidConfig, EnzymeFamilyType, DEFAULT_CONFIG
 
